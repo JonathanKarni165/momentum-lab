@@ -63,7 +63,8 @@ class Ball(pygame.sprite.Sprite):
             self.velocity[1] *= -1
     
     def switch_direction(self, new_direction, magnitude):
-        self.velocity = [new_direction[0]/50 * magnitude , new_direction[1]/50 * magnitude]
+        direction_magnitude = math.sqrt(new_direction[0]**2 + new_direction[1]**2)  
+        self.velocity = [new_direction[0]/direction_magnitude * magnitude , new_direction[1]/direction_magnitude * magnitude]
 
     def draw(self):
         pygame.draw.circle(screen, self.color, (self.x, self.y), self.radius)
@@ -96,7 +97,7 @@ def get_distance_between_two_balls(first_ball, second_ball):
         
 class Plane:
     def __init__(self):
-        self.balls = [Ball(radius=20) for x in range(30)]
+        self.balls = [Ball(radius=10) for x in range(50)]
         [ball.add_force((randint(-30,30), randint(-30,30))) for ball in self.balls]
         
         self.ball_interactions : list[Ball_To_Ball_Interaction] = [] 
