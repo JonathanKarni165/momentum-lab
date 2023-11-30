@@ -6,12 +6,12 @@ WINDOW_SCALE = (600, 600)
 screen = pygame.display.set_mode(WINDOW_SCALE)
 
 FPS = 60
-WHITE = (255,255,255)
-
+WHITE = (255, 255, 255)
 static_ball_counter = 0
 
+
 class Ball(pygame.sprite.Sprite):
-    def __init__(self, radius=None, color=None, spawn_point=None):
+    def __init__(self, radius=None, color=None, spawn_point=None, debug_mode=False):
         super().__init__()
 
         global static_ball_counter
@@ -20,7 +20,8 @@ class Ball(pygame.sprite.Sprite):
 
         self.velocity = [0.0, 0.0]
         self.speed = 0
-        self.already_checked = False
+        self.collision_cooldown = 5
+        self.debug_mode = debug_mode
 
         if radius:
             self.radius = radius
@@ -47,63 +48,134 @@ class Ball(pygame.sprite.Sprite):
         self.velocity[1] += force[1] / self.mass
         self.speed = math.sqrt(self.velocity[0]**2 + self.velocity[1]**2)
 
-    def update_position(self):
+    def get_momentum(self):
+        return [self.velocity[0]*self.mass, self.velocity[1]*self.mass]
+
+    def set_zero_speed(self):
+        self.velocity = [0, 0]
+        self.speed = 0
+
+    def update(self):
+        # print('i am ball num:', self.id, 'my velocity is:', self.velocity)
+        self.collision_cooldown -= 1
         self.x += self.velocity[0]
         self.y += self.velocity[1]
         self.check_collision()
 
     def check_collision(self):
-        horizontal_flip = self.x - self.radius < 0 or self.x + \
-                self.radius > WINDOW_SCALE[0]
-        vertical_flip = self.y - self.radius < 0 or self.y + \
-                self.radius > WINDOW_SCALE[1]
-        if horizontal_flip and self.speed > 0.5:
+        horizontal_flip = (self.x - self.radius < 0 and self.velocity[0] < 0) or \
+            (self.x + self.radius > WINDOW_SCALE[0] and self.velocity[0] > 0)
+        vertical_flip = (self.y - self.radius < 0 and self.velocity[1] < 0) or \
+            (self.y + self.radius > WINDOW_SCALE[1] and self.velocity[1] > 0)
+        if horizontal_flip and self.speed > 0.1:
             self.velocity[0] *= -1
-        if vertical_flip and self.speed > 0.5:
+        if vertical_flip and self.speed > 0.1:
             self.velocity[1] *= -1
-    
-    def switch_direction(self, new_direction, magnitude):
-        direction_magnitude = math.sqrt(new_direction[0]**2 + new_direction[1]**2)  
-        self.velocity = [new_direction[0]/direction_magnitude * magnitude , new_direction[1]/direction_magnitude * magnitude]
 
     def draw(self):
         pygame.draw.circle(screen, self.color, (self.x, self.y), self.radius)
 
+        if self.debug_mode:
+            pygame.draw.line(screen, (255, 0, 0), (self.x, self.y),
+                             (self.x + self.velocity[0] * 10, self.y + self.velocity[1] * 50), 2)
+
 
 class Ball_To_Ball_Interaction:
-    def __init__(self, first_ball : Ball, second_ball : Ball):
+    def __init__(self, first_ball: Ball, second_ball: Ball):
         self.first_ball = first_ball
         self.second_ball = second_ball
         self.min_distance = first_ball.radius + second_ball.radius
-        self.offset = 2
-    
+        self.offset = 3
+        self.consecutive_call_counter = 0
+
+        self.small_ball, self.big_ball = second_ball, first_ball
+        if first_ball.mass < second_ball.mass:
+            self.small_ball, self.big_ball = first_ball, second_ball
+
     def update_interaction(self):
-        self.distance = get_distance_between_two_balls(self.first_ball, self.second_ball)
-        self.direction_between = (self.second_ball.x - self.first_ball.x, self.second_ball.y - self.first_ball.y)
+        self.distance = get_distance_between_two_balls(
+            self.first_ball, self.second_ball)
+        self.direction_between = (
+            self.second_ball.x - self.first_ball.x, self.second_ball.y - self.first_ball.y)
 
     def check_collision(self):
         if self.distance < (self.min_distance + self.offset):
             self.bounce_opposite_directions()
+        else:
+            self.consecutive_call_counter = 0
 
     def bounce_opposite_directions(self):
-        total_kinetic_energy = self.first_ball.speed + self.second_ball.speed
-        self.second_ball.switch_direction(self.direction_between, total_kinetic_energy/2)
-        negative_direction = (-self.direction_between[0], -self.direction_between[1])
-        self.first_ball.switch_direction(negative_direction, total_kinetic_energy/2)
+        if self.consecutive_call_counter > 1:
+            print('block collision')
+            return
+
+        if self.consecutive_call_counter == 1:
+            self.small_ball.velocity = [
+                -self.small_ball.velocity[0], -self.small_ball.velocity[1]]
+            self.consecutive_call_counter += 1
+            print('flip small velocity')
+            return
+
+        print('first collision:\n')
+        print('small ball velocity before:', self.small_ball.velocity)
+        print('big ball velocity before:', self.big_ball.velocity)
+
+        temp_momentum = self.first_ball.get_momentum().copy()
+        self.first_ball.set_zero_speed()
+        self.first_ball.add_force(self.second_ball.get_momentum().copy())
+
+        self.second_ball.set_zero_speed()
+        self.second_ball.add_force(temp_momentum)
+
+        print('\nsmall ball velocity after:', self.small_ball.velocity)
+        print('big ball velocity after:', self.big_ball.velocity)
+
+        self.consecutive_call_counter += 1
+
+
+def vector_addition(vector1, vector2):
+    return [vector1[0]+vector2[0], vector1[1]+vector2[1]]
+
+
+def vector_multiplication(vector, multiply):
+    return [vector[0]*multiply, vector[1]*multiply]
+
 
 def get_distance_between_two_balls(first_ball, second_ball):
     return math.sqrt(math.pow(first_ball.x - second_ball.x, 2) + math.pow(first_ball.y - second_ball.y, 2))
 
-        
+
 class Plane:
-    def __init__(self):
-        self.balls = [Ball(radius=10) for x in range(50)]
-        [ball.add_force((randint(-30,30), randint(-30,30))) for ball in self.balls]
-        
-        self.ball_interactions : list[Ball_To_Ball_Interaction] = [] 
+    def __init__(self, amount=None, speed=None, radius=None, randomize_radius=False):
+
+        if amount is None:
+            self.balls: list[Ball] = []
+            self.ball_interactions: list[Ball_To_Ball_Interaction] = []
+            return
+
+        if randomize_radius:
+            self.balls = [Ball(randint(10, radius)) for x in range(amount)]
+
+        else:
+            self.balls = [Ball(radius) for x in range(amount)]
+        [ball.add_force((randint(-speed, speed),
+                        randint(-speed, speed))) for ball in self.balls]
+
+        self.ball_interactions: list[Ball_To_Ball_Interaction] = []
         for i in range(len(self.balls)):
             for j in range(i+1, len(self.balls)):
-                interaction = Ball_To_Ball_Interaction(self.balls[i], self.balls[j])
+                interaction = Ball_To_Ball_Interaction(
+                    self.balls[i], self.balls[j])
+                self.ball_interactions.append(interaction)
+
+    def add_ball(self, ball):
+        self.balls.append(ball)
+
+        self.ball_interactions: list[Ball_To_Ball_Interaction] = []
+        for i in range(len(self.balls)):
+            for j in range(i+1, len(self.balls)):
+                interaction = Ball_To_Ball_Interaction(
+                    self.balls[i], self.balls[j])
                 self.ball_interactions.append(interaction)
 
     def update_screen(self):
@@ -114,23 +186,58 @@ class Plane:
             interaction.check_collision()
 
         for ball in self.balls:
-            ball.update_position()
+            ball.update()
             ball.draw()
         pygame.display.update()
-    
-            
+
+
+def three_size_ball_plane():
+    plane = Plane()
+    small_ball = Ball(10, spawn_point=(10, 10))
+    small_ball.add_force((10, -10))
+    big_ball = Ball(30, spawn_point=(100, 100))
+    big_ball.add_force((2, 2))
+    medium_ball = Ball(20, spawn_point=(50, 50))
+    medium_ball.add_force((-2, -2))
+    plane.add_ball(small_ball)
+    plane.add_ball(medium_ball)
+    plane.add_ball(big_ball)
+    return plane
+
+
+def one_big_ball_plane():
+    plane = Plane(20, 20, 20, True)
+    big_ball = Ball(50, spawn_point=(100, 100))
+    big_ball.add_force((100, -100))
+    plane.add_ball(big_ball)
+    return plane
+
+
+def small_particles_plane():
+    plane = Plane(100, 20, 10)
+    return plane
+
 
 def main():
     pygame.init()
     clock = pygame.time.Clock()
     run = True
-    plane = Plane()
+    plane = small_particles_plane()
     while (run):
+        global FPS
         clock.tick(FPS)
+
         plane.update_screen()
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 run = False
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_UP:
+                    if FPS < 150:
+                        FPS += 15
+                if event.key == pygame.K_DOWN:
+                    if FPS > 15:
+                        FPS -= 15
 
 
 if __name__ == '__main__':
